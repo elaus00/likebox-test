@@ -10,7 +10,6 @@ from pathlib import Path
 import os
 import logging
 
-
 class PlaylistOCR:
     def __init__(self, video_path: str = None):
         """
@@ -23,6 +22,9 @@ class PlaylistOCR:
         self.frame_buffer = []
         self.results = []
         self.frames_dir = None
+
+        # 사용자 사전 파일 경로
+        self.user_words_path = "musicbrainz_words.txt"
 
         # 로깅 설정
         logging.basicConfig(
@@ -76,8 +78,7 @@ class PlaylistOCR:
         Returns:
             np.ndarray: 추출된 관심 영역(ROI)
         """
-        h, w, _ = frame.shape
-        roi = frame[int(h * 0.55): int(h * 0.9), :]
+        roi = frame[138:597, :]
         return roi
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
@@ -100,10 +101,10 @@ class PlaylistOCR:
         equalized = cv2.equalizeHist(gray)
         return equalized
 
-    def split_image_into_rows(self, image: np.ndarray, row_height: int = 190) -> List[str]:
+    def split_image_into_rows(self, image: np.ndarray, row_height: int = 47) -> List[str]:
         """
         전처리된 ROI 이미지를 행 단위로 분할하여 각 행별 OCR을 수행합니다.
-        (각 행의 높이는 고정하여 190 픽셀로 설정)
+        (각 행의 높이는 고정하여 47 픽셀로 설정)
 
         Args:
             image (np.ndarray): 전처리된 ROI 이미지 (그레이스케일)
@@ -116,6 +117,9 @@ class PlaylistOCR:
         h, w = image.shape
         num_full_rows = h // row_height
 
+        # 사용자 사전 옵션 문자열 생성
+        custom_config = f'--user-words "{self.user_words_path}"'
+
         # 전체 행을 순서대로 처리 (위→아래)
         for i in range(num_full_rows):
             y_start = i * row_height
@@ -123,7 +127,8 @@ class PlaylistOCR:
             row_img = image[y_start:y_end, :]
             # 각 행에 대해 OCR 수행
             pil_row = Image.fromarray(row_img)
-            row_text = pytesseract.image_to_string(pil_row, lang='kor+eng').strip()
+            # 사용자 사전 옵션을 config 파라미터에 추가가
+            row_text = pytesseract.image_to_string(pil_row, lang='kor+eng', config=custom_config).strip()
             if row_text:  # 빈 행은 제외
                 rows_text.append(row_text)
                 self.logger.debug(f"행 {i} OCR 결과: {row_text}")
@@ -134,7 +139,7 @@ class PlaylistOCR:
             y_start = num_full_rows * row_height
             row_img = image[y_start:, :]
             pil_row = Image.fromarray(row_img)
-            row_text = pytesseract.image_to_string(pil_row, lang='kor+eng').strip()
+            row_text = pytesseract.image_to_string(pil_row, lang='kor+eng', config=custom_config).strip()
             if row_text:
                 rows_text.append(row_text)
                 self.logger.debug(f"남은 행 OCR 결과: {row_text}")
@@ -225,14 +230,14 @@ class PlaylistOCR:
 
     def perform_ocr(self) -> List[Dict]:
         """
-        각 프레임에 대해 전처리된 ROI를 행 단위(행 높이 190)로 분할하여 각 행별 OCR을 수행한 후,
+        각 프레임에 대해 전처리된 ROI를 행 단위(행 높이 47)로 분할하여 각 행별 OCR을 수행한 후,
         읽기 순서(위→아래)로 결합하여 곡 정보를 파싱합니다.
 
         Returns:
             List[Dict]: 프레임별 OCR 결과 및 곡 정보
         """
         self.logger.info("OCR 처리를 시작합니다...")
-        row_height = 190
+        row_height = 47
 
         for idx, frame in enumerate(self.frame_buffer):
             # 전처리: ROI 추출, 그레이스케일 변환, 대비 개선
